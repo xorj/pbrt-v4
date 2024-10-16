@@ -23,7 +23,6 @@
 #include <type_traits>
 
 namespace pbrt {
-
 // MaterialEvalContext Definition
 struct MaterialEvalContext : public TextureEvalContext {
     // MaterialEvalContext Public Methods
@@ -136,6 +135,73 @@ PBRT_CPU_GPU void BumpMap(TextureEvaluator texEval, FloatTexture displacement,
     *dpdv = ctx.shading.dpdv + (vDisplace - displace) / dv * Vector3f(ctx.shading.n) +
             displace * Vector3f(ctx.shading.dndv);
 }
+
+// LeafMaterial Definition
+class LeafMaterial {
+public:
+    // LeafMaterial Type Definitions
+    using BxDF = LeafBxDF;
+    using BSSRDF = void;
+
+    // LeafMaterial Public Methods
+    static const char* Name() { return "LeafMaterial"; }
+
+    PBRT_CPU_GPU
+    FloatTexture GetDisplacement() const { return displacement; }
+    PBRT_CPU_GPU
+    const Image* GetNormalMap() const { return normalMap; }
+
+    static LeafMaterial *Create(const TextureParameterDictionary &parameters,
+                                         Image *normalMap, const FileLoc *loc,
+                                         Allocator alloc) {
+        Float n = parameters.GetOneFloat("n", 0.0f);
+        Float sigma = parameters.GetOneFloat("sigma", 0.0f);
+        SpectrumTexture reflectance = parameters.GetSpectrumTexture(
+            "reflectance", nullptr, SpectrumType::Albedo, alloc);
+        if (!reflectance)
+            reflectance = alloc.new_object<SpectrumConstantTexture>(
+                alloc.new_object<ConstantSpectrum>(0.5f));
+        FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+        Warning("[ LeafMaterial refraction: %s roughness: %s ]", n, sigma);
+        return alloc.new_object<LeafMaterial>(reflectance, displacement, normalMap, n, sigma);
+    }
+
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                SampledWavelengths& lambda, void*) const {
+    }
+
+    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
+
+    std::string LeafMaterial::ToString() const {
+        return StringPrintf("[ LeafMaterial refraction: %s roughness: %s ]", n, sigma);
+    }
+
+    LeafMaterial(SpectrumTexture reflectance, FloatTexture displacement,
+                 Image* normalMap, Float n, Float sigma)
+        : normalMap(normalMap), displacement(displacement), reflectance(reflectance),
+          n(n), sigma(sigma) {}
+
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
+        return texEval.CanEvaluate({}, {reflectance});
+    }
+
+    template <typename TextureEvaluator>
+    PBRT_CPU_GPU LeafBxDF GetBxDF(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                  SampledWavelengths& lambda) const {
+        SampledSpectrum r = Clamp(texEval(reflectance, ctx, lambda), 0, 1);
+        return LeafBxDF(r, n, sigma);
+    }
+
+private:
+    // LeafMaterial Private Members
+    Image* normalMap;
+    FloatTexture displacement;
+    SpectrumTexture reflectance;
+    Float n;
+    Float sigma;
+};
 
 // DielectricMaterial Definition
 class DielectricMaterial {

@@ -661,6 +661,11 @@ Material Material::Create(const std::string &name,
         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
     else if (name == "subsurface")
         material = SubsurfaceMaterial::Create(parameters, normalMap, loc, alloc);
+    else if (name == "leaf") {
+        Warning(loc, "Using \"%s\" material.",
+                name.c_str());
+        material = LeafMaterial::Create(parameters, normalMap, loc, alloc);
+    }
     else if (name == "mix") {
         std::vector<std::string> materialNames = parameters.GetStringArray("materials");
         if (materialNames.size() != 2)

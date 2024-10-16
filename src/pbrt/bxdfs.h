@@ -26,6 +26,134 @@
 
 namespace pbrt {
 
+// LeafBxDF Definition
+class LeafBxDF {
+public:
+    // LeafBxDF Public Methods
+    LeafBxDF() = default;
+    PBRT_CPU_GPU LeafBxDF(SampledSpectrum R, Float n, Float sigma) : R(R), n(n), sigma(sigma) {
+    }
+
+    PBRT_CPU_GPU SampledSpectrum f(Vector3f wi, Vector3f wo,
+                      TransportMode mode) const {
+        if (!SameHemisphere(wo, wi))
+            return {};
+
+        // Lambertiano
+        SampledSpectrum f_diff = R * InvPi;
+
+        // Cook-Torrance
+        Vector2f polarWi = getPolarCoordnates(wi);
+        Vector2f polarWo = getPolarCoordnates(wo);
+
+        //Calcula todos ângulos previamente
+        Float thetaI = polarWi.x, thetaO = polarWo.x, phiO = polarWo.y;
+        Float cosThetaI = Cos(thetaI), cosThetaO = Cos(thetaO), sinThetaO = Sin(thetaO),
+              sinThetaI = Sin(thetaI), cosPhiO = Cos(phiO);
+        Float thetaA = (cosThetaI * cosThetaO + sinThetaI * sinThetaO * cosPhiO) / 2;
+
+        if ( cosThetaI == 0 || cosThetaO == 0)
+            return {};
+
+        Float cosThetaA = Cos(thetaA);
+
+        Float cosAlpha = Clamp((cosThetaI + cosThetaO) / (2 * cosThetaA), -1, 1);
+
+        Float tanAlpha2 = (1 - cosAlpha * cosAlpha) / (cosAlpha * cosAlpha);
+
+        //G
+        Float E_1 = (2 * cosAlpha * cosThetaO) / (cosThetaA);
+        Float E_2 = (2 * cosAlpha * cosThetaI) / (cosThetaA);
+
+        Float G = std::min(E_1, E_2);
+        G = std::min(1.f, G);
+
+        // g
+        Float g = std::sqrt(n * n + cosThetaA * cosThetaA - 1);
+
+        // F (fator de Fresnel)
+        Float primeitoTermo = (g - cosThetaA) / (g + cosThetaA);
+        Float segundoTermo = (cosThetaA * (g + cosThetaA) - 1) / (
+                                 cosThetaA * (g - cosThetaA) + 1);
+        Float F = (1 / 2.f) * (primeitoTermo * primeitoTermo) * (
+                      1 + segundoTermo * segundoTermo);
+
+        // D
+        Float cos4Alpha = cosAlpha * cosAlpha * cosAlpha * cosAlpha;
+
+        Float sigma2 = sigma * sigma;
+
+        Float D = FastExp(-tanAlpha2 / sigma2) / (sigma2 * cos4Alpha);
+
+        Float float_f_spec = D * F * G * (InvPi * InvPi) / (2 * cosThetaI * cosThetaO);
+
+        if(IsNaN(float_f_spec)) return f_diff;
+
+        SampledSpectrum f_spec = SampledSpectrum(float_f_spec);
+
+        // Fr
+        return f_diff + f_spec;
+    }
+
+    PBRT_CPU_GPU pstd::optional<BSDFSample> Sample_f(
+        Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
+        // Sample cosine-weighted hemisphere to compute _wi_ and _pdf_
+        Vector3f wi = SampleCosineHemisphere(u);
+        if (wo.z < 0)
+            wi.z *= -1;
+        Float pdf = CosineHemispherePDF(AbsCosTheta(wi));
+
+        if (!SameHemisphere(wo, wi))
+            return {};
+
+        return BSDFSample(f(wi, wo, mode), wi, pdf, BxDFFlags::SpecularReflection);
+    }
+
+    PBRT_CPU_GPU static constexpr const char* Name() { return "LeafBxDF"; }
+
+    std::string LeafBxDF::ToString() const {
+        return StringPrintf("[ LeafBxDF R: %s ]", R);
+    }
+
+    PBRT_CPU_GPU Float LeafBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
+                       BxDFReflTransFlags sampleFlags) const {
+        return CosineHemispherePDF(AbsCosTheta(wi));
+    }
+
+    PBRT_CPU_GPU void Regularize() {
+    }
+
+    PBRT_CPU_GPU BxDFFlags Flags() const {
+        return R ? BxDFFlags::DiffuseReflection : BxDFFlags::Unset;
+    }
+
+private:
+    SampledSpectrum R;
+    Float n;
+    Float sigma;
+
+    static Vector2f getPolarCoordnates(const Vector3f vec) {
+        Vector2f polar;
+        polar.x = std::atan2(vec.y, vec.x); // Calculate theta
+        Float r = std::sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
+        // Calculate r (magnitude of the vector)
+        polar.y = std::acos(vec.z / r); // Calculate phi
+        return polar;
+    }
+
+    static Float Cos(Float angle) {
+        return std::cos(angle);
+    }
+
+    static Float Sin(Float angle) {
+        return std::sin(angle);
+    }
+
+    static Float Tan(Float angle) {
+        return std::tan(angle);
+    }
+};
+
 // DiffuseBxDF Definition
 class DiffuseBxDF {
   public:
